@@ -1,0 +1,60 @@
+# Model hyperparameters — all values overridable from CLI via --config
+# Paper reference: arXiv:2410.05364 Appendix E
+
+encoder:
+  type: gin               # gin | chembert
+  hidden_dim: 256         # output embedding size; must match token_dim in models below
+  num_layers: 3           # GIN convolution layers
+  dropout: 0.1
+
+action_proposal:
+  n_diffusion_steps: 32   # DDPM reverse steps (T in paper)
+  n_layers: 5             # Transformer encoder layers
+  token_dim: 256          # must match encoder.hidden_dim
+  n_heads: 8
+  mlp_hidden: 2048        # Transformer FFN hidden size
+  horizon: 10             # F — planning horizon (synthesis steps ahead)
+  history_len: 1          # H — steps of history to condition on
+  dropout: 0.1
+
+world_model:
+  # ReactionT5 backbone from HuggingFace.
+  # After first download, set backbone_id to a local path for offline use.
+  backbone_id: sagawa/ReactionT5
+  freeze_backbone: false        # set true for inference-only or low-VRAM
+  gradient_checkpointing: true  # required for 16GB GPU (Kaggle P100)
+  n_diffusion_steps: 10         # DDIM reverse steps
+  eta: 0.0                      # DDIM stochasticity; 0.0 = deterministic
+  n_layers: 5                   # Transformer layers on top of backbone
+  token_dim: 256                # must match encoder.hidden_dim
+  n_heads: 8
+  mlp_hidden: 2048
+  dropout: 0.1
+
+value_fn:
+  n_objectives: 10        # must match len(objectives) below
+  n_layers: 10
+  token_dim: 256          # must match encoder.hidden_dim
+  n_heads: 8
+  mlp_hidden: 2048
+  gamma: 0.99             # discount factor for return computation
+  dropout: 0.1
+
+# Ordered list of objectives — position i matches ValueFunction output head i
+objectives:
+  - yield
+  - purity
+  - cost
+  - novelty
+  - fto_risk
+  - green_chem
+  - manufacturability
+  - safety
+  - robustness
+  - supply_avail
+
+mpc:
+  n_candidates: 64        # N candidate action sequences to sample
+  max_steps: 10           # maximum planning horizon at inference
+  planner_type: beam      # beam | mcts
+  beam_width: 5           # beam search width (used when planner_type=beam)

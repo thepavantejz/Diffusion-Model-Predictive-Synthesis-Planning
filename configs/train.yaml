@@ -1,0 +1,29 @@
+# Training configuration
+# All values are overridable from CLI scripts via --config and argparse flags.
+
+optimizer: adam
+lr: 1.0e-4
+lr_schedule: cosine         # cosine | constant | linear
+warmup_steps: 500
+weight_decay: 1.0e-4
+ema_decay: 0.99
+grad_clip_norm: 5.0
+
+# Batch sizes — reduce if OOM
+batch_size_world_model: 32      # ReactionT5 fine-tuning (P100 16GB with grad checkpointing)
+batch_size_proposal: 64
+batch_size_value: 64
+
+# Training duration per model
+max_steps: 100000
+
+# Logging and checkpointing
+eval_every: 1000
+save_every: 5000
+log_every: 100
+
+# Device — overridden by --device CLI arg
+device: cuda   # cuda | cpu
+
+# Reproducibility
+seed: 42

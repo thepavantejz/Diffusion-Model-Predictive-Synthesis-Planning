@@ -1,0 +1,45 @@
+# Data pipeline configuration
+# Column name mappings for user-supplied CSV — set to match your file's actual headers.
+# Fields marked 'required' must be present; others are optional (logged if missing).
+
+csv_columns:
+  reactant_smiles: reactant_smiles      # required: SMILES or comma-separated list
+  product_smiles: product_smiles        # required
+  reaction_class_id: reaction_class_id  # required: integer class index
+  temperature: temperature              # optional: float, Kelvin
+  pressure: pressure                    # optional: float, atm
+  time_hours: time_hours                # optional: float
+  solvent: solvent                      # optional: SMILES or name
+  catalyst: catalyst                    # optional: SMILES or name
+  reagent_ratio: reagent_ratio          # optional: float
+  yield_percent: yield_percent          # optional: float [0, 100]
+  purity_percent: purity_percent        # optional: float [0, 100]
+  cost_usd: cost_usd                    # optional: float
+
+# Reaction taxonomy
+num_reaction_classes: 100   # size of reaction type vocabulary
+                             # 10-class or 100-class USPTO depending on tokenizer
+
+# Condition vocabulary sizes (built from training data during preprocess)
+num_solvents: 64
+num_catalysts: 128
+
+# Normalization ranges for continuous action features
+# Temperatures outside [temp_min_k, temp_max_k] will be clipped and logged.
+temp_min_k: 200.0
+temp_max_k: 450.0
+pressure_min_atm: 0.1
+pressure_max_atm: 20.0
+time_min_h: 0.1
+time_max_h: 72.0
+reagent_ratio_min: 0.5
+reagent_ratio_max: 5.0
+
+# Train / val / test split
+train_frac: 0.90
+val_frac: 0.05
+test_frac: 0.05
+split_seed: 42
+
+# Minimum trajectory length to include in training
+min_trajectory_length: 2

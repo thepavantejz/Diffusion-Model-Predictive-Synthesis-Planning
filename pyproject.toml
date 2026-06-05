@@ -1,0 +1,34 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "dmpsp"
+version = "0.1.0"
+description = "Diffusion Model Predictive Synthesis Planning — controllable synthesis world model for pharma"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+# Dependencies are in requirements.txt (exact pins for reproducibility).
+# Install with: pip install -r requirements.txt && pip install -e .
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["dmpsp*", "data*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = false
+ignore_missing_imports = true

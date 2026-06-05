@@ -1,0 +1,32 @@
+# Production dependencies — exact pins for reproducibility
+# Install: pip install -r requirements.txt
+#
+# PyTorch Geometric wheels require matching torch/CUDA versions.
+# See: https://pytorch-geometric.readthedocs.io/en/latest/install/installation.html
+# Example (CUDA 12.1):
+#   pip install torch==2.4.0 --index-url https://download.pytorch.org/whl/cu121
+#   pip install torch-geometric==2.4.0 -f https://data.pyg.org/whl/torch-2.4.0+cu121.html
+
+torch==2.4.0
+torch-geometric==2.4.0
+# torch-scatter, torch-sparse, torch-cluster are optional PyG deps;
+# install separately if needed for your CUDA version.
+
+rdkit==2024.03.5
+transformers==4.44.0
+datasets==2.21.0
+accelerate==0.33.0
+tokenizers==0.19.1
+
+httpx==0.27.2
+pydantic==2.7.4
+fastapi==0.111.1
+uvicorn==0.30.6
+
+numpy==1.26.4
+pandas==2.2.2
+scikit-learn==1.5.1
+scipy==1.14.0
+tqdm==4.66.5
+PyYAML==6.0.2
+python-dotenv==1.0.1
