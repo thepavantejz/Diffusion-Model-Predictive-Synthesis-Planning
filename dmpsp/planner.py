@@ -43,6 +43,8 @@ class PlannerConfig:
     beam_width: int = 5             # beam search width
     history_len: int = 1            # H — history context length
     device: str = "cpu"
+    deterministic: bool = True      # DDIM (True) vs DDPM (False) for proposal sampling
+    seed: Optional[int] = None      # RNG seed for reproducible sampling; None = random
 
 
 class DMPSPPlanner:
@@ -170,7 +172,10 @@ class DMPSPPlanner:
 
         # 1. Sample N candidate action sequences from ρ
         candidate_actions = self.action_proposal.sample(
-            state_enc, history_enc, n_samples=self.cfg.n_candidates
+            state_enc, history_enc,
+            n_samples=self.cfg.n_candidates,
+            deterministic=self.cfg.deterministic,
+            seed=self.cfg.seed,
         )  # (N, F, action_dim)
 
         # 2. Predict future state trajectories via p_d
@@ -311,6 +316,8 @@ def load_models(
     world_model = build_world_model(model_cfg)
     value_fn = build_value_fn(model_cfg)
 
+    from dmpsp.utils import latest_checkpoint
+
     for name, model in [
         ("encoder", encoder),
         ("action_proposal", action_proposal),
@@ -318,6 +325,9 @@ def load_models(
         ("value_fn", value_fn),
     ]:
         ckpt_path = ckpt_dir / f"{name}.pt"
+        if not ckpt_path.exists():
+            # Try subdirectory format: checkpoints/<name>/checkpoint_step*.pt
+            ckpt_path = latest_checkpoint(ckpt_dir / name) or ckpt_path
         if ckpt_path.exists():
             load_checkpoint(ckpt_path, model, device=device)
         else:

@@ -174,16 +174,41 @@ def _parse_csv_row(
 # USPTO loader
 # ---------------------------------------------------------------------------
 
+def _strip_atom_maps(smiles: str) -> str:
+    """Remove atom map numbers (:N) from a SMILES string via RDKit.
+
+    Falls back to regex stripping if RDKit parse fails.
+    """
+    try:
+        from rdkit.Chem import MolFromSmiles, MolToSmiles
+        mol = MolFromSmiles(smiles)
+        if mol is None:
+            raise ValueError("RDKit parse failed")
+        for atom in mol.GetAtoms():
+            atom.SetAtomMapNum(0)
+        return MolToSmiles(mol)
+    except Exception:
+        import re
+        return re.sub(r":\d+", "", smiles)
+
+
 def load_uspto(path: Path) -> Generator[ReactionRecord, None, None]:
-    """Load reaction records from USPTO-50K or USPTO-FULL in CSV format.
+    """Load reaction records from USPTO-50K parquet or CSV.
 
-    USPTO-50K can be obtained from:
-    https://github.com/connorcoley/rexgen_direct (processed CSV)
+    Supports two formats (auto-detected from column names):
 
-    Expected columns: reactants, products, reaction_type (1-10 or 0-99)
+    HF format (pingzhili/uspto-50k parquet):
+        rxn_smiles  — atom-mapped reaction SMILES: 'reactants>>product'
+        prod_smiles — clean product SMILES
+        class       — integer reaction class
+
+    Legacy CSV format:
+        reactants     — dot-separated reactant SMILES
+        products      — product SMILES
+        reaction_type — integer reaction class
 
     Args:
-        path: Path to USPTO CSV file.
+        path: Path to USPTO parquet or CSV file.
 
     Yields:
         ReactionRecord per valid reaction.
@@ -195,50 +220,179 @@ def load_uspto(path: Path) -> Generator[ReactionRecord, None, None]:
     if not path.exists():
         raise FileNotFoundError(f"USPTO file not found: {path}")
 
+    suffix = path.suffix.lower()
+    if suffix == ".parquet":
+        yield from _load_uspto_parquet(path)
+    else:
+        yield from _load_uspto_csv(path)
+
+
+def _load_uspto_parquet(path: Path) -> Generator[ReactionRecord, None, None]:
+    """Load USPTO from HF-format parquet (rxn_smiles / prod_smiles / class)."""
+    import pandas as pd
+    df = pd.read_parquet(path)
+
+    # Filter keep=True if column exists
+    if "keep" in df.columns:
+        df = df[df["keep"] == True]  # noqa: E712
+
+    total = len(df)
+    skipped = 0
+
+    for _, row in df.iterrows():
+        rxn_smiles_raw = str(row.get("rxn_smiles", "") or "").strip()
+        prod_smiles_raw = str(row.get("prod_smiles", "") or "").strip()
+        rxn_class = int(row.get("class", 0) or 0)
+
+        if not rxn_smiles_raw:
+            skipped += 1
+            continue
+
+        # Parse reactants from atom-mapped reaction SMILES (reactants>>product)
+        parts = rxn_smiles_raw.split(">>")
+        if len(parts) < 2:
+            skipped += 1
+            continue
+
+        reactants_part = parts[0]
+        reactant_smiles: list[str] = []
+        valid = True
+        for smi in reactants_part.split("."):
+            smi = smi.strip()
+            if not smi:
+                continue
+            clean = _strip_atom_maps(smi)
+            if not validate_smiles(clean):
+                valid = False
+                break
+            reactant_smiles.append(canonicalize_smiles(clean))
+
+        if not valid or not reactant_smiles:
+            skipped += 1
+            continue
+
+        # Product: prefer clean prod_smiles column over parsing rxn_smiles
+        if prod_smiles_raw and validate_smiles(prod_smiles_raw):
+            product_smiles = canonicalize_smiles(prod_smiles_raw)
+        else:
+            raw_prod = _strip_atom_maps(parts[-1].strip())
+            if not validate_smiles(raw_prod):
+                skipped += 1
+                continue
+            product_smiles = canonicalize_smiles(raw_prod)
+
+        yield ReactionRecord(
+            reactant_smiles=reactant_smiles,
+            product_smiles=product_smiles,
+            reaction_class_id=rxn_class,
+            source="uspto",
+        )
+
+    logger.info(
+        "USPTO parquet loader: %d total, %d valid, %d skipped (%s)",
+        total, total - skipped, skipped, path.name,
+    )
+
+
+def _load_uspto_csv(path: Path) -> Generator[ReactionRecord, None, None]:
+    """Load USPTO from legacy CSV (reactants / products / reaction_type columns)."""
     total = 0
     skipped = 0
 
     with open(path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+
+        # Auto-detect HF-style CSV (rxn_smiles column) vs legacy
+        hf_style = "rxn_smiles" in fieldnames
+
         for row in reader:
             total += 1
 
-            reactants_raw = row.get("reactants", "").strip()
-            product_raw = row.get("products", "").strip()
-            rxn_type_raw = row.get("reaction_type", "0").strip()
+            if hf_style:
+                rxn_smiles_raw = row.get("rxn_smiles", "").strip()
+                prod_smiles_raw = row.get("prod_smiles", "").strip()
+                rxn_class_raw = row.get("class", "0").strip()
 
-            if not reactants_raw or not product_raw:
-                skipped += 1
-                continue
+                parts = rxn_smiles_raw.split(">>") if rxn_smiles_raw else []
+                if len(parts) < 2:
+                    skipped += 1
+                    continue
 
-            # USPTO uses '.' to separate multiple reactants
-            reactant_smiles_raw = [s.strip() for s in reactants_raw.split(".") if s.strip()]
-            reactant_smiles: list[str] = []
-            valid = True
-            for smi in reactant_smiles_raw:
-                if not validate_smiles(smi):
-                    valid = False
-                    break
-                reactant_smiles.append(canonicalize_smiles(smi))
+                reactants_part = parts[0]
+                reactant_smiles: list[str] = []
+                valid = True
+                for smi in reactants_part.split("."):
+                    smi = smi.strip()
+                    if not smi:
+                        continue
+                    clean = _strip_atom_maps(smi)
+                    if not validate_smiles(clean):
+                        valid = False
+                        break
+                    reactant_smiles.append(canonicalize_smiles(clean))
 
-            if not valid or not validate_smiles(product_raw):
-                skipped += 1
-                continue
+                if not valid or not reactant_smiles:
+                    skipped += 1
+                    continue
 
-            try:
-                rxn_type = int(rxn_type_raw)
-            except ValueError:
-                rxn_type = 0
+                if prod_smiles_raw and validate_smiles(prod_smiles_raw):
+                    product_smiles = canonicalize_smiles(prod_smiles_raw)
+                else:
+                    raw_prod = _strip_atom_maps(parts[-1].strip())
+                    if not validate_smiles(raw_prod):
+                        skipped += 1
+                        continue
+                    product_smiles = canonicalize_smiles(raw_prod)
 
-            yield ReactionRecord(
-                reactant_smiles=reactant_smiles,
-                product_smiles=canonicalize_smiles(product_raw),
-                reaction_class_id=rxn_type,
-                source="uspto",
-            )
+                try:
+                    rxn_type = int(rxn_class_raw)
+                except ValueError:
+                    rxn_type = 0
+
+                yield ReactionRecord(
+                    reactant_smiles=reactant_smiles,
+                    product_smiles=product_smiles,
+                    reaction_class_id=rxn_type,
+                    source="uspto",
+                )
+
+            else:
+                reactants_raw = row.get("reactants", "").strip()
+                product_raw = row.get("products", "").strip()
+                rxn_type_raw = row.get("reaction_type", "0").strip()
+
+                if not reactants_raw or not product_raw:
+                    skipped += 1
+                    continue
+
+                reactant_smiles_raw = [s.strip() for s in reactants_raw.split(".") if s.strip()]
+                reactant_smiles = []
+                valid = True
+                for smi in reactant_smiles_raw:
+                    if not validate_smiles(smi):
+                        valid = False
+                        break
+                    reactant_smiles.append(canonicalize_smiles(smi))
+
+                if not valid or not validate_smiles(product_raw):
+                    skipped += 1
+                    continue
+
+                try:
+                    rxn_type = int(rxn_type_raw)
+                except ValueError:
+                    rxn_type = 0
+
+                yield ReactionRecord(
+                    reactant_smiles=reactant_smiles,
+                    product_smiles=canonicalize_smiles(product_raw),
+                    reaction_class_id=rxn_type,
+                    source="uspto",
+                )
 
     logger.info(
-        "USPTO loader: %d total, %d valid, %d skipped (%s)",
+        "USPTO CSV loader: %d total, %d valid, %d skipped (%s)",
         total, total - skipped, skipped, path.name,
     )
 

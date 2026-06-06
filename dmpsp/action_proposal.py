@@ -21,6 +21,7 @@ import torch.nn.functional as F
 from dmpsp.diffusion import (
     EMAModel,
     compute_diffusion_loss,
+    ddim_reverse_step,
     ddpm_reverse_step,
     make_schedule,
     q_sample,
@@ -248,30 +249,51 @@ class ActionProposalDiffusion(nn.Module):
         state_enc: torch.Tensor,
         history_enc: torch.Tensor,
         n_samples: int = 64,
+        deterministic: bool = True,
+        seed: Optional[int] = None,
     ) -> torch.Tensor:
-        """Sample N candidate action sequences using DDPM reverse process.
+        """Sample N candidate action sequences.
 
         Args:
             state_enc: State encoding, shape (1, state_dim) or (B, state_dim).
             history_enc: History encoding, shape (1, H, state_dim) or (B, H, state_dim).
             n_samples: Number of candidate sequences to sample.
+            deterministic: If True, use DDIM (eta=0) — fully reproducible given seed.
+                           If False, use DDPM (stochastic, richer diversity).
+            seed: Optional RNG seed. When set, starting noise is fixed → identical
+                  outputs across calls with the same inputs.
 
         Returns:
             Sampled action sequences, shape (n_samples, F, action_dim).
         """
         device = state_enc.device
-        # Expand state/history to n_samples copies
         s = state_enc.expand(n_samples, -1)
         h = history_enc.expand(n_samples, -1, -1)
 
-        # Start from pure noise
-        x = torch.randn(n_samples, self.horizon, self.action_dim, device=device)
+        # Fix starting noise if seed given
+        if seed is not None:
+            gen = torch.Generator(device=device)
+            gen.manual_seed(seed)
+            x = torch.randn(
+                n_samples, self.horizon, self.action_dim, device=device, generator=gen
+            )
+        else:
+            x = torch.randn(n_samples, self.horizon, self.action_dim, device=device)
 
-        # DDPM reverse process
-        for t_int in reversed(range(self.n_diffusion_steps)):
-            t_batch = torch.full((n_samples,), t_int, dtype=torch.long, device=device)
-            predicted_noise = self.forward(x, t_batch, s, h)
-            x = ddpm_reverse_step(predicted_noise, x, t_int, self._schedule_dict())
+        sched = self._schedule_dict()
+
+        if deterministic:
+            # DDIM reverse process (eta=0): deterministic denoising
+            for t_int in reversed(range(self.n_diffusion_steps)):
+                t_batch = torch.full((n_samples,), t_int, dtype=torch.long, device=device)
+                predicted_noise = self.forward(x, t_batch, s, h)
+                x = ddim_reverse_step(predicted_noise, x, t_int, t_int - 1, sched, eta=0.0)
+        else:
+            # DDPM reverse process (stochastic)
+            for t_int in reversed(range(self.n_diffusion_steps)):
+                t_batch = torch.full((n_samples,), t_int, dtype=torch.long, device=device)
+                predicted_noise = self.forward(x, t_batch, s, h)
+                x = ddpm_reverse_step(predicted_noise, x, t_int, sched)
 
         return x
 

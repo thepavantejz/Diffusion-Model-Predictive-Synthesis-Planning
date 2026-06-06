@@ -20,7 +20,7 @@ action_proposal:
 world_model:
   # ReactionT5 backbone from HuggingFace.
   # After first download, set backbone_id to a local path for offline use.
-  backbone_id: sagawa/ReactionT5
+  backbone_id: sagawa/ReactionT5v2-forward
   freeze_backbone: false        # set true for inference-only or low-VRAM
   gradient_checkpointing: true  # required for 16GB GPU (Kaggle P100)
   n_diffusion_steps: 10         # DDIM reverse steps

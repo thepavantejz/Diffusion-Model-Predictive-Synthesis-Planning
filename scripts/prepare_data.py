@@ -39,13 +39,12 @@ from dmpsp.utils import setup_logging
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Public dataset download URLs
+# Public dataset sources
 # ---------------------------------------------------------------------------
 
-_USPTO_50K_URL = (
-    "https://raw.githubusercontent.com/connorcoley/rexgen_direct/"
-    "master/rexgen_direct/data/train.csv"
-)
+# USPTO-50K: pingzhili/uspto-50k on HuggingFace (49K train + 1K val)
+_USPTO_50K_HF_REPO = "pingzhili/uspto-50k"
+
 _ORD_RELEASE_URL = (
     "https://github.com/open-reaction-database/ord-data/archive/refs/heads/main.zip"
 )
@@ -60,6 +59,86 @@ def download_file(url: str, dest: Path) -> Path:
     logger.info("Downloading %s → %s", url, dest)
     urllib.request.urlretrieve(url, dest)
     logger.info("Download complete: %s (%d bytes)", dest, dest.stat().st_size)
+    return dest
+
+
+# HF dataset viewer rows API — returns JSON batches, no pyarrow required
+# HF parquet URLs — downloaded in a subprocess to avoid pyarrow/torch DLL conflict
+_USPTO_50K_PARQUET_URLS = {
+    "train": (
+        "https://huggingface.co/datasets/pingzhili/uspto-50k/resolve/"
+        "refs%2Fconvert%2Fparquet/default/train/0000.parquet"
+    ),
+    "validation": (
+        "https://huggingface.co/datasets/pingzhili/uspto-50k/resolve/"
+        "refs%2Fconvert%2Fparquet/default/validation/0000.parquet"
+    ),
+}
+
+# Conversion script runs in a clean subprocess (no torch imports → no DLL conflict)
+_PARQUET_TO_CSV_SCRIPT = """\
+import sys, pandas as pd
+train_path, val_path, out_csv = sys.argv[1], sys.argv[2], sys.argv[3]
+frames = []
+for p in (train_path, val_path):
+    df = pd.read_parquet(p)
+    if 'keep' in df.columns:
+        df = df[df['keep'] == True]
+    frames.append(df[['rxn_smiles', 'prod_smiles', 'class']])
+combined = pd.concat(frames, ignore_index=True)
+combined.to_csv(out_csv, index=False)
+print(f"Converted {len(combined)} rows to {out_csv}")
+"""
+
+
+def download_uspto_50k(dest: Path) -> Path:
+    """Download USPTO-50K from HuggingFace parquet and convert to CSV.
+
+    Runs the parquet → CSV conversion in a clean subprocess to avoid
+    pyarrow / PyTorch DLL conflicts on Windows. The main process only
+    reads the resulting CSV with the standard csv module.
+
+    Args:
+        dest: Output .csv file path.
+
+    Returns:
+        dest path.
+
+    Raises:
+        RuntimeError: If download or subprocess conversion fails.
+    """
+    import subprocess
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    # Download parquet splits via urllib (no torch imports needed)
+    parquet_paths: dict[str, Path] = {}
+    for split_name, url in _USPTO_50K_PARQUET_URLS.items():
+        split_path = dest.parent / f"uspto50k_{split_name}.parquet"
+        if not split_path.exists():
+            logger.info("Downloading USPTO-50K '%s' split from HuggingFace...", split_name)
+            download_file(url, split_path)
+        else:
+            logger.info("Using cached '%s' split: %s", split_name, split_path)
+        parquet_paths[split_name] = split_path
+
+    # Convert parquet → CSV in a clean subprocess (no torch loaded → no DLL conflict)
+    logger.info("Converting parquet to CSV (subprocess)...")
+    result = subprocess.run(
+        [
+            sys.executable, "-c", _PARQUET_TO_CSV_SCRIPT,
+            str(parquet_paths["train"]),
+            str(parquet_paths["validation"]),
+            str(dest),
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Parquet-to-CSV conversion failed:\n{result.stderr}"
+        )
+    logger.info(result.stdout.strip())
     return dest
 
 
@@ -121,10 +200,10 @@ def main() -> None:
         records = list(load_csv(args.data_path, data_cfg.get("csv_columns", {})))
 
     elif args.source == "uspto50k":
-        raw_path = args.data_path or out_dir / "raw" / "uspto50k_train.csv"
+        raw_path = args.data_path or out_dir / "raw" / "uspto50k.csv"
         if not raw_path.exists():
-            logger.info("Downloading USPTO-50K training set...")
-            download_file(_USPTO_50K_URL, raw_path)
+            logger.info("USPTO-50K not found locally — downloading from HuggingFace...")
+            download_uspto_50k(raw_path)
         logger.info("Loading USPTO-50K: %s", raw_path)
         records = list(load_uspto(raw_path))
 

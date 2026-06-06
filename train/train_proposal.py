@@ -88,6 +88,8 @@ def main() -> None:
                         help="Override batch_size from train_config.")
     parser.add_argument("--resume", action="store_true",
                         help="Resume from latest checkpoint in --out_dir.")
+    parser.add_argument("--save_every", type=int, default=None,
+                        help="Override save_every from train_config.")
     parser.add_argument("--log_level", default="INFO")
     args = parser.parse_args()
     setup_logging(args.log_level)
@@ -106,7 +108,7 @@ def main() -> None:
     ema_decay = float(train_cfg.get("ema_decay", 0.99))
     grad_clip = float(train_cfg.get("grad_clip_norm", 5.0))
     eval_every = int(train_cfg.get("eval_every", 1000))
-    save_every = int(train_cfg.get("save_every", 5000))
+    save_every = args.save_every or int(train_cfg.get("save_every", 5000))
     log_every = int(train_cfg.get("log_every", 100))
 
     # Build model and optimizer
