@@ -321,7 +321,7 @@ def _load_reactiont5(
         RuntimeError: If model download fails.
     """
     try:
-        from transformers import T5ForConditionalGeneration, T5Tokenizer
+        from transformers import AutoTokenizer, T5ForConditionalGeneration
     except ImportError as exc:
         raise ImportError(
             "ChemistryWorldModel requires 'transformers'. "
@@ -329,7 +329,7 @@ def _load_reactiont5(
         ) from exc
 
     logger.info("Loading ReactionT5 backbone: %s", model_id)
-    tokenizer = T5Tokenizer.from_pretrained(model_id)
+    tokenizer = AutoTokenizer.from_pretrained(model_id, use_fast=True)
     model = T5ForConditionalGeneration.from_pretrained(model_id)
 
     if gradient_checkpointing:
