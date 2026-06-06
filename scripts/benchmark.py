@@ -242,8 +242,8 @@ def main() -> None:
         description="Benchmark DMPSP on USPTO-50K test set."
     )
     parser.add_argument("--checkpoint_dir", type=Path, required=True)
-    parser.add_argument("--data_dir", type=Path, default=Path("data/processed/"))
-    parser.add_argument("--model_config", type=Path, default=Path("configs/model.yaml"))
+    parser.add_argument("--data_dir", type=Path, default=Path(__file__).parent.parent / "data" / "processed")
+    parser.add_argument("--model_config", type=Path, default=Path(__file__).parent.parent / "configs" / "model.yaml")
     parser.add_argument("--device", default="cpu")
     parser.add_argument(
         "--n_molecules", type=int, default=100,

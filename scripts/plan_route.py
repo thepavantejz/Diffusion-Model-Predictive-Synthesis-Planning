@@ -45,7 +45,7 @@ def main() -> None:
         help="JSON string mapping objective name to weight. Default: balanced weights.",
     )
     parser.add_argument(
-        "--model_config", type=Path, default=Path("configs/model.yaml"),
+        "--model_config", type=Path, default=Path(__file__).parent.parent / "configs" / "model.yaml",
         help="Path to model config YAML.",
     )
     parser.add_argument(

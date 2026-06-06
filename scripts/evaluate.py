@@ -243,7 +243,7 @@ def main() -> None:
         help="Directory with trained model checkpoints.",
     )
     parser.add_argument(
-        "--model_config", type=Path, default=Path("configs/model.yaml"),
+        "--model_config", type=Path, default=Path(__file__).parent.parent / "configs" / "model.yaml",
     )
     parser.add_argument(
         "--device", default="cpu",
