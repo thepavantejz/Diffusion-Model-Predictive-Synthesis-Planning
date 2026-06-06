@@ -2,10 +2,11 @@
 # Paper reference: arXiv:2410.05364 Appendix E
 
 encoder:
-  type: gin               # gin | chembert
+  type: morgan            # morgan | gin | chembert
   hidden_dim: 256         # output embedding size; must match token_dim in models below
-  num_layers: 3           # GIN convolution layers
-  dropout: 0.1
+  radius: 2               # Morgan fingerprint radius (morgan only)
+  # num_layers: 3         # GIN convolution layers (gin only)
+  # dropout: 0.1          # (gin only)
 
 action_proposal:
   n_diffusion_steps: 32   # DDPM reverse steps (T in paper)

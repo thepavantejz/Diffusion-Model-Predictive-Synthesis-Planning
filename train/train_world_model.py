@@ -33,7 +33,8 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from data.dataset import SynthesisDataset
 from data.preprocess import load_trajectories
 from dmpsp.diffusion import EMAModel
-from dmpsp.utils import resume_or_init, save_checkpoint, setup_logging
+from dmpsp.encoder import build_encoder
+from dmpsp.utils import latest_checkpoint, load_checkpoint, resume_or_init, save_checkpoint, setup_logging
 from dmpsp.world_model import build_world_model
 from train.train_proposal import build_optimizer, build_scheduler
 
@@ -55,6 +56,8 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--save_every", type=int, default=None,
                         help="Override save_every from train_config.")
+    parser.add_argument("--encoder_dir", type=Path, default=None,
+                        help="Shared encoder checkpoint dir (default: out_dir/../encoder/).")
     parser.add_argument("--log_level", default="INFO")
     args = parser.parse_args()
     setup_logging(args.log_level)
@@ -73,6 +76,29 @@ def main() -> None:
     eval_every = int(train_cfg.get("eval_every", 1000))
     save_every = args.save_every or int(train_cfg.get("save_every", 5000))
     log_every = int(train_cfg.get("log_every", 100))
+
+    # Load shared encoder (must match the one used during proposal training)
+    encoder_dir = args.encoder_dir or (args.out_dir.parent / "encoder")
+    encoder = build_encoder(model_cfg.get("encoder", {}))
+    encoder_ckpt = latest_checkpoint(encoder_dir)
+    if encoder_ckpt:
+        load_checkpoint(encoder_ckpt, encoder, device="cpu")
+        logger.info("Loaded encoder from %s", encoder_ckpt)
+    else:
+        encoder_dir.mkdir(parents=True, exist_ok=True)
+        ckpt_path = encoder_dir / "checkpoint_step00000001.pt"
+        torch.save({
+            "step": 1, "loss": 0.0,
+            "model_state": encoder.state_dict(),
+            "optimizer_state": {},
+            "config": model_cfg.get("encoder", {}),
+        }, ckpt_path)
+        logger.warning("No encoder checkpoint found — saved new encoder to %s", ckpt_path)
+    encoder.eval()
+
+    def _encoder_fn(smiles: str) -> torch.Tensor:
+        with torch.no_grad():
+            return encoder.encode([smiles], torch.device("cpu"))[0]
 
     model = build_world_model(model_cfg).to(device)
     optimizer = build_optimizer(model, train_cfg)
@@ -97,10 +123,12 @@ def main() -> None:
     enc_dim = model_cfg.get("encoder", {}).get("hidden_dim", 256)
 
     train_ds = SynthesisDataset(
-        train_trajs, "dynamics", horizon=F, history_len=H, encoder_hidden_dim=enc_dim
+        train_trajs, "dynamics", encoder_fn=_encoder_fn,
+        horizon=F, history_len=H, encoder_hidden_dim=enc_dim,
     )
     val_ds = SynthesisDataset(
-        val_trajs, "dynamics", horizon=F, history_len=H, encoder_hidden_dim=enc_dim
+        val_trajs, "dynamics", encoder_fn=_encoder_fn,
+        horizon=F, history_len=H, encoder_hidden_dim=enc_dim,
     ) if val_trajs else None
 
     train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=True)

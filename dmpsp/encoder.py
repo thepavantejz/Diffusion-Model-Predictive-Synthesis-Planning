@@ -15,6 +15,8 @@ from abc import ABC, abstractmethod
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from rdkit import Chem
+from rdkit.Chem import rdFingerprintGenerator
 from torch_geometric.data import Batch, Data
 from torch_geometric.nn import GINConv, global_mean_pool
 
@@ -154,9 +156,49 @@ class ChemBERTaEncoder(MolecularEncoder):
         return self.proj(cls_emb)
 
 
+class MorganFPEncoder(MolecularEncoder):
+    """RDKit Morgan fingerprint encoder.
+
+    2048-bit Morgan circular fingerprint (radius=2) → Linear(2048, hidden_dim).
+    Fingerprint computation is deterministic (no training needed for the FP itself).
+    The linear projection layer is saved with the checkpoint so all models
+    trained in the same run share the identical molecular representations.
+
+    No PyG or HuggingFace required — only RDKit (always available).
+    """
+
+    FP_DIM: int = 2048
+
+    def __init__(self, hidden_dim: int = 256, radius: int = 2) -> None:
+        super().__init__(hidden_dim)
+        self.radius = radius
+        self.proj = nn.Linear(self.FP_DIM, hidden_dim, bias=True)
+        self._generator = rdFingerprintGenerator.GetMorganGenerator(
+            radius=radius, fpSize=self.FP_DIM
+        )
+        self._cache: dict[str, torch.Tensor] = {}  # per-process FP cache
+
+    def _smiles_to_fp(self, smiles: str) -> torch.Tensor:
+        if smiles in self._cache:
+            return self._cache[smiles]
+        mol = Chem.MolFromSmiles(smiles)
+        if mol is None:
+            fp_tensor = torch.zeros(self.FP_DIM)
+        else:
+            bits = self._generator.GetFingerprint(mol)
+            fp_tensor = torch.tensor(list(bits), dtype=torch.float)
+        self._cache[smiles] = fp_tensor
+        return fp_tensor
+
+    def encode(self, smiles_list: list[str], device: torch.device) -> torch.Tensor:
+        fps = torch.stack([self._smiles_to_fp(s) for s in smiles_list]).to(device)
+        return self.proj(fps.to(next(self.proj.parameters()).device))
+
+
 _ENCODER_REGISTRY: dict[str, type[MolecularEncoder]] = {
     "gin": GINEncoder,
     "chembert": ChemBERTaEncoder,
+    "morgan": MorganFPEncoder,
 }
 
 
