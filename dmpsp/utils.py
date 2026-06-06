@@ -180,6 +180,7 @@ def save_checkpoint(
     loss: float,
     cfg: dict,
     ema_model: Optional[nn.Module] = None,
+    keep_last: int = 2,
 ) -> Path:
     """Save model, optimizer state, and config to a checkpoint file.
 
@@ -191,6 +192,7 @@ def save_checkpoint(
         loss: Current validation loss (stored in payload).
         cfg: Config dict to store alongside weights (for config-match validation on load).
         ema_model: Optional EMA model to also checkpoint.
+        keep_last: Delete older checkpoints, keeping only this many. Default 2.
 
     Returns:
         Path to the saved checkpoint file.
@@ -209,6 +211,13 @@ def save_checkpoint(
         payload["ema_model_state"] = ema_model.state_dict()
     torch.save(payload, path)
     logger.info("Saved checkpoint: %s  (step=%d, loss=%.4f)", path, step, loss)
+
+    # Purge old checkpoints to keep disk usage bounded
+    old = sorted(out_dir.glob("checkpoint_step*.pt"))
+    for stale in old[:-keep_last]:
+        stale.unlink(missing_ok=True)
+        logger.debug("Deleted old checkpoint: %s", stale)
+
     return path
 
 
