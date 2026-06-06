@@ -17,8 +17,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from rdkit import Chem
 from rdkit.Chem import rdFingerprintGenerator
-from torch_geometric.data import Batch, Data
-from torch_geometric.nn import GINConv, global_mean_pool
 
 from dmpsp.utils import mol_to_pyg_data, NODE_FEAT_DIM
 
@@ -67,6 +65,17 @@ class GINEncoder(MolecularEncoder):
         dropout: float = 0.1,
     ) -> None:
         super().__init__(hidden_dim)
+        try:
+            from torch_geometric.data import Batch
+            from torch_geometric.nn import GINConv, global_mean_pool
+        except Exception as exc:
+            raise ImportError(
+                f"GINEncoder requires torch_geometric (error: {exc}). "
+                "Use encoder type 'morgan' if torch_geometric is unavailable."
+            ) from exc
+        self._Batch = Batch
+        self._global_mean_pool = global_mean_pool
+
         self.num_layers = num_layers
         self.dropout_p = dropout
 
@@ -100,12 +109,12 @@ class GINEncoder(MolecularEncoder):
             x = bn(x)
             x = F.relu(x)
             x = F.dropout(x, p=self.dropout_p, training=self.training)
-        x = global_mean_pool(x, data.batch)
+        x = self._global_mean_pool(x, data.batch)
         return self.out_proj(x)
 
     def encode(self, smiles_list: list[str], device: torch.device) -> torch.Tensor:
-        graphs: list[Data] = [mol_to_pyg_data(s) for s in smiles_list]
-        batch = Batch.from_data_list(graphs).to(device)
+        graphs = [mol_to_pyg_data(s) for s in smiles_list]
+        batch = self._Batch.from_data_list(graphs).to(device)
         return self.forward(batch)
 
 
