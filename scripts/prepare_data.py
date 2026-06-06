@@ -161,8 +161,8 @@ def main() -> None:
     parser.add_argument(
         "--data_config",
         type=Path,
-        default=Path("configs/data.yaml"),
-        help="Path to data config YAML. Default: configs/data.yaml.",
+        default=Path(__file__).parent.parent / "configs" / "data.yaml",
+        help="Path to data config YAML. Default: <repo_root>/configs/data.yaml.",
     )
     parser.add_argument(
         "--out_dir",
